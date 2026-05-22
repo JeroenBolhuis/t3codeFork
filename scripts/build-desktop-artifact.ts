@@ -559,6 +559,37 @@ export function resolveDesktopProductName(version: string): string {
     : (desktopPackageJson.productName ?? "T3 Code");
 }
 
+/** UTC timestamp for local artifact filenames, e.g. `20260522-143052`. */
+export function formatDesktopBuildTimestamp(date = new Date()): string {
+  return date.toISOString().slice(0, 19).replace(/[:-]/g, "").replace("T", "-");
+}
+
+export function appendBuildTimestampToArtifactName(
+  filename: string,
+  timestamp: string,
+): string {
+  const lastDot = filename.lastIndexOf(".");
+  if (lastDot <= 0) {
+    return `${filename}-${timestamp}`;
+  }
+
+  return `${filename.slice(0, lastDot)}-${timestamp}${filename.slice(lastDot)}`;
+}
+
+export function shouldTimestampDesktopArtifacts(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const override = env.T3CODE_DESKTOP_TIMESTAMP_ARTIFACTS?.trim().toLowerCase();
+  if (override === "false" || override === "0") {
+    return false;
+  }
+  if (override === "true" || override === "1") {
+    return true;
+  }
+
+  return env.CI !== "true";
+}
+
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,
   target: string,
@@ -868,13 +899,20 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stageEntries = yield* fs.readDirectory(stageDistDir);
   yield* fs.makeDirectory(options.outputDir, { recursive: true });
 
+  const timestampArtifacts = shouldTimestampDesktopArtifacts();
+  const buildTimestamp = timestampArtifacts ? formatDesktopBuildTimestamp() : undefined;
+
   const copiedArtifacts: string[] = [];
   for (const entry of stageEntries) {
     const from = path.join(stageDistDir, entry);
     const stat = yield* fs.stat(from).pipe(Effect.catch(() => Effect.succeed(null)));
     if (!stat || stat.type !== "File") continue;
 
-    const to = path.join(options.outputDir, entry);
+    const outputName =
+      buildTimestamp === undefined
+        ? entry
+        : appendBuildTimestampToArtifactName(entry, buildTimestamp);
+    const to = path.join(options.outputDir, outputName);
     yield* fs.copyFile(from, to);
     copiedArtifacts.push(to);
   }

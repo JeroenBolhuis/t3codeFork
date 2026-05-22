@@ -5,6 +5,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
 import {
+  appendBuildTimestampToArtifactName,
+  formatDesktopBuildTimestamp,
   resolveDesktopRuntimeDependencies,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
@@ -12,6 +14,7 @@ import {
   resolveDesktopUpdateChannel,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
+  shouldTimestampDesktopArtifacts,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 
@@ -61,6 +64,35 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "@effect/platform-node": "4.0.0-beta.59",
         effect: "4.0.0-beta.59",
       },
+    );
+  });
+
+  it("appends a UTC build timestamp before the artifact extension", () => {
+    const timestamp = formatDesktopBuildTimestamp(new Date("2026-05-22T14:30:52.000Z"));
+    assert.equal(timestamp, "20260522-143052");
+    assert.equal(
+      appendBuildTimestampToArtifactName("T3-Code-0.0.17-x64.AppImage", timestamp),
+      "T3-Code-0.0.17-x64-20260522-143052.AppImage",
+    );
+    assert.equal(
+      appendBuildTimestampToArtifactName("latest-linux.yml", timestamp),
+      "latest-linux-20260522-143052.yml",
+    );
+  });
+
+  it("timestamps local desktop artifacts unless CI or explicitly disabled", () => {
+    assert.equal(shouldTimestampDesktopArtifacts({}), true);
+    assert.equal(shouldTimestampDesktopArtifacts({ CI: "true" }), false);
+    assert.equal(
+      shouldTimestampDesktopArtifacts({
+        CI: "true",
+        T3CODE_DESKTOP_TIMESTAMP_ARTIFACTS: "true",
+      }),
+      true,
+    );
+    assert.equal(
+      shouldTimestampDesktopArtifacts({ T3CODE_DESKTOP_TIMESTAMP_ARTIFACTS: "false" }),
+      false,
     );
   });
 
