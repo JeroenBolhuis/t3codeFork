@@ -1205,6 +1205,22 @@ export const makeCodexSessionRuntime = (
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
       yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
+      yield* client.request("account/rateLimits/read", undefined).pipe(
+        Effect.flatMap((payload) =>
+          emitEvent({
+            kind: "notification",
+            threadId: options.threadId,
+            method: "account/rateLimits/updated",
+            payload,
+          }),
+        ),
+        Effect.catch((error) =>
+          Effect.logDebug("Codex account rate limit read failed", {
+            threadId: options.threadId,
+            cause: error.message,
+          }),
+        ),
+      );
       return session;
     });
 

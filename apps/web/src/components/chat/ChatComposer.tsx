@@ -76,6 +76,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { AgentUsageIndicator } from "./AgentUsageIndicator";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../vscode-icons";
 import { cn, randomUUID } from "~/lib/utils";
@@ -108,6 +109,13 @@ import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
+import {
+  deriveAgentUsageSnapshotFromRateLimits,
+  deriveLatestAgentUsageSnapshot,
+  makePendingAgentUsageSnapshot,
+} from "../../lib/agentUsage";
+import { useAgentUsageStore } from "../../lib/agentUsageStore";
+import { readLocalApi } from "../../localApi";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -775,6 +783,68 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => deriveLatestContextWindowSnapshot(activeThreadActivities ?? []),
     [activeThreadActivities],
   );
+  const cachedAgentUsage = useAgentUsageStore((store) =>
+    selectedProvider === "codex" ? (store.usageByInstanceId[selectedInstanceId] ?? null) : null,
+  );
+  const shouldFetchAgentUsage = useAgentUsageStore((store) => store.shouldFetch);
+  const markAgentUsageFetchStarted = useAgentUsageStore((store) => store.markFetchStarted);
+  const markAgentUsageFetchFinished = useAgentUsageStore((store) => store.markFetchFinished);
+  const updateAgentUsage = useAgentUsageStore((store) => store.updateUsage);
+  const threadAgentUsage = useMemo(
+    () => deriveLatestAgentUsageSnapshot(activeThreadActivities ?? [], selectedProvider),
+    [activeThreadActivities, selectedProvider],
+  );
+  const activeAgentUsage = useMemo(
+    () =>
+      threadAgentUsage ??
+      cachedAgentUsage ??
+      makePendingAgentUsageSnapshot(selectedProvider, selectedInstanceId),
+    [cachedAgentUsage, selectedInstanceId, selectedProvider, threadAgentUsage],
+  );
+
+  useEffect(() => {
+    if (threadAgentUsage?.source !== "rate-limits") {
+      return;
+    }
+    updateAgentUsage(threadAgentUsage.providerInstanceId ?? selectedInstanceId, threadAgentUsage);
+  }, [selectedInstanceId, threadAgentUsage, updateAgentUsage]);
+
+  useEffect(() => {
+    if (selectedProvider !== "codex" || !shouldFetchAgentUsage(selectedInstanceId)) {
+      return;
+    }
+
+    const api = readLocalApi();
+    if (!api) {
+      return;
+    }
+
+    markAgentUsageFetchStarted(selectedInstanceId);
+    void api.server
+      .getProviderUsage({ instanceId: selectedInstanceId })
+      .then((result) => {
+        const snapshot = deriveAgentUsageSnapshotFromRateLimits({
+          provider: result.provider,
+          providerInstanceId: result.providerInstanceId,
+          rateLimits: result.rateLimits,
+          updatedAt: result.readAt,
+        });
+        markAgentUsageFetchFinished(selectedInstanceId, snapshot);
+      })
+      .catch((error: unknown) => {
+        markAgentUsageFetchFinished(
+          selectedInstanceId,
+          null,
+          error instanceof Error ? error.message : "Failed to load Codex usage.",
+        );
+      });
+  }, [
+    markAgentUsageFetchFinished,
+    markAgentUsageFetchStarted,
+    selectedInstanceId,
+    selectedProvider,
+    shouldFetchAgentUsage,
+  ]);
 
   // ------------------------------------------------------------------
   // Composer-local state
@@ -2336,6 +2406,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }}
                   onInstanceModelChange={onProviderModelSelect}
                 />
+                {activeAgentUsage ? <AgentUsageIndicator usage={activeAgentUsage} /> : null}
 
                 {isComposerFooterCompact ? (
                   <CompactComposerControlsMenu

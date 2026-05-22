@@ -9,6 +9,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
+  CodexSettings,
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   type AuthAccessStreamEvent,
   AuthSessionId,
@@ -24,17 +25,23 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProviderDriverKind,
+  type ProviderInstanceId,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
+  ServerProviderUsageError,
+  type ServerProviderUsageResult,
   FilesystemBrowseError,
   ThreadId,
   type TerminalEvent,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import * as CodexClient from "effect-codex-app-server/client";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
@@ -50,6 +57,8 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
+import { buildCodexInitializeParams } from "./provider/Layers/CodexProvider.ts";
+import { deriveProviderInstanceConfigMap } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
@@ -88,10 +97,15 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import { expandHomePath } from "./pathExpansion.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+const decodeCodexSettings = Schema.decodeUnknownEffect(CodexSettings);
+const isServerProviderUsageError = Schema.is(ServerProviderUsageError);
+const describeProviderUsageError = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : "Failed to read Codex usage.";
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -600,6 +614,72 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         };
       });
 
+      const readCodexProviderUsage = (input: {
+        readonly instanceId: ProviderInstanceId;
+      }): Effect.Effect<
+        ServerProviderUsageResult,
+        ServerProviderUsageError,
+        ChildProcessSpawner.ChildProcessSpawner
+      > =>
+        Effect.gen(function* () {
+          const settings = yield* serverSettings.getSettings;
+          const instanceConfig = deriveProviderInstanceConfigMap(settings)[input.instanceId];
+
+          if (!instanceConfig || instanceConfig.driver !== "codex") {
+            return yield* new ServerProviderUsageError({
+              providerInstanceId: input.instanceId,
+              reason: `Provider instance ${input.instanceId} is not a Codex instance.`,
+            });
+          }
+
+          const codexSettings = yield* decodeCodexSettings(instanceConfig.config ?? {});
+          const resolvedHomePath = codexSettings.homePath
+            ? expandHomePath(codexSettings.homePath)
+            : undefined;
+          const instanceEnvironment = Object.fromEntries(
+            (instanceConfig.environment ?? [])
+              .filter((entry) => entry.name.length > 0 && !entry.valueRedacted)
+              .map((entry) => [entry.name, entry.value]),
+          );
+          const clientContext = yield* Layer.build(
+            CodexClient.layerCommand({
+              command: codexSettings.binaryPath,
+              args: ["app-server"],
+              cwd: config.cwd,
+              env: {
+                ...process.env,
+                ...instanceEnvironment,
+                ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
+              },
+            }),
+          );
+          const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+            Effect.provide(clientContext),
+          );
+
+          yield* client.request("initialize", buildCodexInitializeParams());
+          yield* client.notify("initialized", undefined);
+          const rateLimits = yield* client.request("account/rateLimits/read", undefined);
+
+          return {
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: input.instanceId,
+            readAt: yield* nowIso,
+            rateLimits,
+          };
+        }).pipe(
+          Effect.scoped,
+          Effect.mapError((cause) =>
+            isServerProviderUsageError(cause)
+              ? cause
+              : new ServerProviderUsageError({
+                  providerInstanceId: input.instanceId,
+                  reason: describeProviderUsageError(cause),
+                  cause,
+                }),
+          ),
+        );
+
       const refreshGitStatus = (cwd: string) =>
         vcsStatusBroadcaster
           .refreshStatus(cwd)
@@ -846,6 +926,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.serverGetProviderUsage]: (input) =>
+          observeRpcEffect(WS_METHODS.serverGetProviderUsage, readCodexProviderUsage(input), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateProvider,

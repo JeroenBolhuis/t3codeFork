@@ -533,6 +533,25 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "account.rate-limits.updated": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "agent-usage.updated",
+          summary: "Agent usage updated",
+          payload: {
+            provider: event.provider,
+            providerInstanceId: event.providerInstanceId,
+            rateLimits: event.payload.rateLimits,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "item.updated": {
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];

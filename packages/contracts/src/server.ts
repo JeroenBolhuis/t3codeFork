@@ -194,6 +194,32 @@ export type ServerProvider = typeof ServerProvider.Type;
 export const ServerProviders = Schema.Array(ServerProvider);
 export type ServerProviders = typeof ServerProviders.Type;
 
+export const ServerProviderUsageInput = Schema.Struct({
+  instanceId: ProviderInstanceId,
+});
+export type ServerProviderUsageInput = typeof ServerProviderUsageInput.Type;
+
+export const ServerProviderUsageResult = Schema.Struct({
+  provider: ProviderDriverKind,
+  providerInstanceId: ProviderInstanceId,
+  readAt: IsoDateTime,
+  rateLimits: Schema.Unknown,
+});
+export type ServerProviderUsageResult = typeof ServerProviderUsageResult.Type;
+
+export class ServerProviderUsageError extends Schema.TaggedErrorClass<ServerProviderUsageError>()(
+  "ServerProviderUsageError",
+  {
+    providerInstanceId: ProviderInstanceId,
+    reason: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return `Provider usage failed for ${this.providerInstanceId}: ${this.reason}`;
+  }
+}
+
 /**
  * Treat the optional `availability` as "available" when absent. This is
  * the rule legacy producers (which omit the field) and new producers
