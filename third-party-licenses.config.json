@@ -428,6 +428,13 @@
       }
     },
     {
+      "name": "remark-math",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) Junyoung Choi <fluke8259@gmail.com>"]
+      }
+    },
+    {
       "name": "@expo/devcert",
       "generatedNotice": {
         "licenseId": "MIT",

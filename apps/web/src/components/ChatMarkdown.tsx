@@ -52,6 +52,7 @@ import {
   markdownImageSourceFragment,
 } from "@t3tools/client-runtime/markdown-images";
 import { inlineCodeFilePathCandidate } from "@t3tools/client-runtime/markdown-links";
+import { remarkChatMath } from "@t3tools/client-runtime/markdown-math";
 import { mediaFileReference, mediaUrlReference } from "@t3tools/client-runtime/media-reference";
 import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@t3tools/shared/filePreview";
 import * as Cause from "effect/Cause";
@@ -527,7 +528,12 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   attributes: {
     ...defaultSchema.attributes,
     "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
-    code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta", "dataInlineCode"],
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      "dataCodeMeta",
+      "dataInlineCode",
+      "dataMathDisplay",
+    ],
     blockquote: [...(defaultSchema.attributes?.blockquote ?? []), "dataAlert"],
     div: [...(defaultSchema.attributes?.div ?? []), ...CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES],
     a: [...(defaultSchema.attributes?.a ?? []), "dataPullRequestAutolink"],
@@ -553,6 +559,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkChatMath,
   remarkKeepWindowsPathDestinations,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
@@ -563,6 +570,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
 
 const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGfm,
+  remarkChatMath,
   remarkKeepWindowsPathDestinations,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
@@ -578,6 +586,25 @@ const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypePreserveImageSourceMeta,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
+const LazyMarkdownMath = React.lazy(() => import("./MarkdownMath"));
+
+function MarkdownFormula({ code, displayMode = false }: { code: string; displayMode?: boolean }) {
+  const fallback = <code>{code}</code>;
+  return (
+    <span
+      className="chat-markdown-math"
+      data-display={displayMode ? "block" : "inline"}
+      data-markdown-copy={displayMode ? `$$\n${code}\n$$\n\n` : `\\(${code}\\)`}
+    >
+      <RenderErrorBoundary fallback={fallback} resetKeys={[code, displayMode]}>
+        <Suspense fallback={fallback}>
+          <LazyMarkdownMath code={code} displayMode={displayMode} />
+        </Suspense>
+      </RenderErrorBoundary>
+    </span>
+  );
+}
 
 /** GitHub's own five alert kinds, in its colors: the glyph names the urgency, the title says it. */
 const GITHUB_ALERT_PRESENTATIONS: Record<
@@ -3356,6 +3383,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const { cwd, imageBaseDir, inlineCodeFileLinkMetaByText, fileLinkChip } = use(
       ChatMarkdownRendererContext,
     );
+    if (extractFenceLanguage(className) === "math") {
+      return (
+        <MarkdownFormula
+          code={nodeToPlainText(children)}
+          displayMode={node?.properties?.dataMathDisplay === "block"}
+        />
+      );
+    }
     if (node?.properties?.dataInlineCode != null) {
       const codeText = nodeToPlainText(children);
       const fileLinkMeta =
@@ -3520,6 +3555,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
     }
 
     const language = extractFenceLanguage(codeBlock.className);
+    if (language === "math") {
+      return <MarkdownFormula code={codeBlock.code.trim()} displayMode />;
+    }
     const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
     const highlightedCode = (
       <RenderErrorBoundary

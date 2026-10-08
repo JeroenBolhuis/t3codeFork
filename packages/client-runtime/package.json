@@ -67,6 +67,10 @@
       "types": "./src/markdownLinks.ts",
       "default": "./src/markdownLinks.ts"
     },
+    "./markdown-math": {
+      "types": "./src/markdownMath.ts",
+      "default": "./src/markdownMath.ts"
+    },
     "./media-reference": {
       "types": "./src/mediaReference.ts",
       "default": "./src/mediaReference.ts"
@@ -411,6 +415,7 @@
     "mdast-util-directive": "^3.1.0",
     "micromark-extension-directive": "^4.0.0",
     "micromark-util-character": "^2.1.1",
+    "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
     "three": "0.180.0",
     "unified": "^11.0.5"
