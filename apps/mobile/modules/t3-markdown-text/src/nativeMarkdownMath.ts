@@ -33,7 +33,11 @@ export function parseNativeMarkdownMath(
             : "math_inline",
         content: node.value,
       });
-      source += `${markdown.slice(offset, start)}\`${marker}\``;
+      source += markdown.slice(offset, start);
+      // Adjacent closing/opening backticks merge into one CommonMark delimiter.
+      if (source.endsWith("`")) source += " ";
+      source += `\`${marker}\``;
+      if (markdown[end] === "`") source += " ";
       offset = end;
     } else if ("children" in node) {
       for (const child of node.children) visit(child);

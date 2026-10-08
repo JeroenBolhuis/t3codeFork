@@ -1,18 +1,23 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import { parseMarkdownWithMath } from "@t3tools/shared/markdownMath";
 import type { MarkdownNode } from "react-native-nitro-markdown/headless";
 
 import { parseNativeMarkdownMath } from "./nativeMarkdownMath";
 
-// The native binding returns code spans with text children. Keep that boundary
-// explicit while exercising the real Markdown parser's delimiter precedence.
+// Use CommonMark tokenization at the native code-span boundary: a regex would
+// incorrectly accept adjacent backtick runs as separate spans.
 function codeSpans(source: string): MarkdownNode {
-  return {
-    type: "document",
-    children: [...source.matchAll(/`([^`]+)`/g)].map((match) => ({
-      type: "code_inline",
-      children: [{ type: "text", content: match[1]! }],
-    })),
+  const tree = parseMarkdownWithMath(source);
+  const children: MarkdownNode[] = [];
+  const visit = (node: typeof tree | (typeof tree.children)[number]): void => {
+    if (node.type === "inlineCode") {
+      children.push({ type: "code_inline", children: [{ type: "text", content: node.value }] });
+    } else if ("children" in node) {
+      node.children.forEach(visit);
+    }
   };
+  visit(tree);
+  return { type: "document", children };
 }
 
 describe("native math parsing", () => {
@@ -28,6 +33,16 @@ describe("native math parsing", () => {
     expect(parseNativeMarkdownMath(source, codeSpans).children).toEqual([
       { type, content: String.raw`\sqrt{x}`, children: [] },
     ]);
+  });
+
+  it.each([
+    [String.raw`\(x\)\(y\)`, ["math_inline", "math_inline"], ["x", "y"]],
+    [String.raw`\[x\]\(y\)\[z\]`, ["math_block", "math_inline", "math_block"], ["x", "y", "z"]],
+    ["`code`\\(x\\)`more`", ["code_inline", "math_inline", "code_inline"], ["code", "x", "more"]],
+  ])("keeps adjacent formulas and code separate: %s", (source, types, contents) => {
+    const nodes = parseNativeMarkdownMath(source, codeSpans).children ?? [];
+    expect(nodes.map((node) => node.type)).toEqual(types);
+    expect(nodes.map((node) => node.content ?? node.children?.[0]?.content)).toEqual(contents);
   });
 
   it.each([
