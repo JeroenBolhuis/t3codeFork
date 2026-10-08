@@ -428,6 +428,12 @@
       }
     },
     {
+      "name": "mj-context-menu",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
       "name": "remark-math",
       "generatedNotice": {
         "licenseId": "MIT",
