@@ -11,7 +11,7 @@ function codeSpans(source: string): MarkdownNode {
   const children: MarkdownNode[] = [];
   const visit = (node: typeof tree | (typeof tree.children)[number]): void => {
     if (node.type === "inlineCode") {
-      children.push({ type: "code_inline", children: [{ type: "text", content: node.value }] });
+      children.push({ type: "code_inline", content: node.value });
     } else if ("children" in node) {
       node.children.forEach(visit);
     }
