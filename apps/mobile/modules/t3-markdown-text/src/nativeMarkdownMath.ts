@@ -13,6 +13,12 @@ export function parseNativeMarkdownMath(
 
   let prefix = "t3-math:";
   while (markdown.includes(prefix)) prefix += ":";
+  // Authored backticks, including unmatched ones, cannot close a placeholder.
+  let fenceLength = 1;
+  for (const [run] of markdown.matchAll(/`+/g)) {
+    fenceLength = Math.max(fenceLength, run.length + 1);
+  }
+  const fence = "`".repeat(fenceLength);
   const formulas = new Map<string, MarkdownNode>();
   let source = "";
   let offset = 0;
@@ -36,7 +42,7 @@ export function parseNativeMarkdownMath(
       source += markdown.slice(offset, start);
       // Adjacent closing/opening backticks merge into one CommonMark delimiter.
       if (source.endsWith("`")) source += " ";
-      source += `\`${marker}\``;
+      source += `${fence}${marker}${fence}`;
       if (markdown[end] === "`") source += " ";
       offset = end;
     } else if ("children" in node) {

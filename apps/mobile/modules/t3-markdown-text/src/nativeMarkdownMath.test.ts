@@ -45,6 +45,15 @@ describe("native math parsing", () => {
     expect(nodes.map((node) => node.content ?? node.children?.[0]?.content)).toEqual(contents);
   });
 
+  it.each(["`\\(x\\)", "``\\(x\\)", "\\(x\\)`", "``before \\(x\\) after ````"])(
+    "restores math beside unmatched authored backticks: %s",
+    (source) => {
+      expect(parseNativeMarkdownMath(source, codeSpans).children).toEqual([
+        { type: "math_inline", content: "x", children: [] },
+      ]);
+    },
+  );
+
   it.each([
     "Pay $20 or $30.",
     String.raw`Unfinished \[\sqrt{x}`,
@@ -65,7 +74,7 @@ describe("native math parsing", () => {
     const parse = vi.fn(codeSpans);
     const result = parseNativeMarkdownMath(source, parse);
     expect(parse).toHaveBeenCalledWith(
-      "**Growth `t3-math::0`** and `t3-math:0` then `t3-math::1`.",
+      "**Growth ``t3-math::0``** and `t3-math:0` then ``t3-math::1``.",
     );
     expect(result.children?.map((node) => node.type)).toEqual([
       "math_inline",
