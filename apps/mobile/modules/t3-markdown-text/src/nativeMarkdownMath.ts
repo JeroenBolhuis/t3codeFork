@@ -1,4 +1,4 @@
-import { parseMarkdownWithMath } from "@t3tools/client-runtime/markdown-math";
+import { parseMarkdownWithMath } from "@t3tools/shared/markdownMath";
 import type { MarkdownNode } from "react-native-nitro-markdown/headless";
 
 type ParsedNode = ReturnType<typeof parseMarkdownWithMath>;
